@@ -32,11 +32,13 @@ server_session::server_session(server *srv, RPCLIB_ASIO::io_service *io,
 void server_session::start() { do_read(); }
 
 void server_session::close() {
+    auto self(shared_from_base<server_session>());
     LOG_INFO("Closing session.");
     exit_ = true;
-    write_strand_.post([this]() {
+    write_strand_.post([this, self]() {
         socket_.close();
-        parent_->close_session(shared_from_base<server_session>());
+        if (parent_)
+            parent_->close_session(self);
     });
 }
 
@@ -60,7 +62,7 @@ void server_session::do_read() {
                     // any worker thread can take this call
                     auto z = std::shared_ptr<RPCLIB_MSGPACK::zone>(
                         result.zone().release());
-                    io_->post([this, msg, z]() {
+                    io_->post([this, self, msg, z]() {
                         this_handler().clear();
                         this_session().clear();
                         this_session().set_id(reinterpret_cast<session_id_t>(this));
@@ -96,7 +98,7 @@ void server_session::do_read() {
                                 [=]() { write(resp.get_data()); });
 #else
                             write_strand_.post(
-                                [this, resp, z]() { write(resp.get_data()); });
+                                [this, self, resp, z]() { write(resp.get_data()); });
 #endif
                         }
 

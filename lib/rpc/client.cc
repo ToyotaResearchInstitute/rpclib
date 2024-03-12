@@ -49,6 +49,7 @@ struct client::impl {
                 if (!ec) {
                     std::unique_lock<std::mutex> lock(mut_connection_finished_);
                     LOG_INFO("Client connected to {}:{}", addr_, port_);
+                    writer_->socket_.set_option(RPCLIB_ASIO::ip::tcp::no_delay(true));
                     is_connected_ = true;
                     state_ = client::connection_state::connected;
                     conn_finished_.notify_all();
@@ -192,8 +193,7 @@ void client::wait_conn() {
 }
 
 int client::get_next_call_idx() {
-    ++(pimpl->call_idx_);
-    return pimpl->call_idx_;
+    return ++(pimpl->call_idx_);
 }
 
 void client::post(std::shared_ptr<RPCLIB_MSGPACK::sbuffer> buffer, int idx,

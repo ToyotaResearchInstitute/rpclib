@@ -39,13 +39,18 @@ struct server::impl {
 
     void start_accept() {
         acceptor_.async_accept(socket_, [this](std::error_code ec) {
+            std::lock_guard<std::mutex> lock(_mutex);
             if (!ec) {
                 LOG_INFO("Accepted connection.");
+                socket_.set_option(RPCLIB_ASIO::ip::tcp::no_delay(true));
                 auto s = std::make_shared<server_session>(
                     parent_, &io_, std::move(socket_), parent_->disp_,
                     suppress_exceptions_);
                 s->start();
                 sessions_.push_back(s);
+                if (callback_on_connection_) {
+                    callback_on_connection_(s);
+                }
             } else {
                 LOG_ERROR("Error while accepting connection: {}", ec);
             }
@@ -55,10 +60,22 @@ struct server::impl {
     }
 
     void close_sessions() {
+        std::lock_guard<std::mutex> lock(_mutex);
         for (auto &session : sessions_) {
             session->close();
         }
         sessions_.clear();
+    }
+
+    void close_session(std::shared_ptr<detail::server_session> const &s) {
+        std::lock_guard<std::mutex> lock(_mutex);
+        auto it = std::find(begin(sessions_), end(sessions_), s);
+        if (it != end(sessions_)) {
+            if (callback_on_disconnection_) {
+                callback_on_disconnection_(*it);
+            }
+            sessions_.erase(it);
+        }
     }
 
     void stop() {
@@ -73,6 +90,9 @@ struct server::impl {
     rpc::detail::thread_group loop_workers_;
     std::vector<std::shared_ptr<server_session>> sessions_;
     std::atomic_bool suppress_exceptions_;
+    callback_type callback_on_connection_;
+    callback_type callback_on_disconnection_;
+    std::mutex _mutex;
     RPCLIB_CREATE_LOG_CHANNEL(server)
 };
 
@@ -129,10 +149,15 @@ void server::stop() { pimpl->stop(); }
 void server::close_sessions() { pimpl->close_sessions(); }
 
 void server::close_session(std::shared_ptr<detail::server_session> const &s) {
-  auto it = std::find(begin(pimpl->sessions_), end(pimpl->sessions_), s);
-  if (it != end(pimpl->sessions_)) {
-    pimpl->sessions_.erase(it);
-  }
+    pimpl->close_session(s);
+}
+
+void server::set_on_connection(callback_type obj) {
+    pimpl->callback_on_connection_ = obj;
+}
+
+void server::set_on_disconnection(callback_type obj) {
+    pimpl->callback_on_disconnection_ = obj;
 }
 
 } /* rpc */
